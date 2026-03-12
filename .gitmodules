@@ -1,0 +1,6 @@
+[submodule "genshin-db"]
+	path = genshin-db
+	url = https://github.com/theBowja/genshin-db.git
+[submodule "PaddleOCR"]
+	path = PaddleOCR
+	url = https://github.com/PaddlePaddle/PaddleOCR.git
