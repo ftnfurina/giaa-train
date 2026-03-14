@@ -1,0 +1,42 @@
+{
+  "cSpell.words": [
+    "albucore",
+    "albumentations",
+    "anemo",
+    "bbox",
+    "cryo",
+    "cuda",
+    "cython",
+    "dendro",
+    "fromarray",
+    "ftnfurina",
+    "genshin",
+    "getbbox",
+    "giaa",
+    "lmdb",
+    "numpy",
+    "opencv",
+    "paddlepaddle",
+    "pdparams",
+    "ppocr",
+    "pretrained",
+    "pyclipper",
+    "pyproject",
+    "pyro",
+    "pyyaml",
+    "rapidfuzz",
+    "scikit",
+    "setuptools",
+    "tqdm",
+    "unactivated"
+  ],
+  "cSpell.ignorePaths": [
+    ".git/{info,lfs,logs,refs,objects}/**",
+    ".git/{index,*refs,*HEAD}",
+    ".vscode",
+    "*.lock",
+    ".git*",
+    "*.yml"
+  ],
+  "git.ignoreLimitWarning": true
+}
