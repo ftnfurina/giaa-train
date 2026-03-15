@@ -12,12 +12,15 @@ import shutil
 
 TTF_PATH = Path("configs/genshin.ttf")
 DATASET_PATH = Path("dataset/")
-DATASET_CROP_PATH = DATASET_PATH.joinpath("crop")
-DATASET_IMAGES_PATH = DATASET_PATH.joinpath("images")
+DATASET_CROP_FOLDER_NAME = "crop"
+DATASET_IMAGES_FOLDER_NAME = "images"
+DATASET_IMAGES_PATH = DATASET_PATH.joinpath(DATASET_IMAGES_FOLDER_NAME)
+DATASET_CROP_PATH = DATASET_PATH.joinpath(DATASET_CROP_FOLDER_NAME)
+
 BACKGROUND_PATH = Path("configs/background/")
 
-TRAIN_COUNT = 8  # 训练集数量
-VAL_COUNT = 2  # 验证集数量
+TRAIN_COUNT = 4  # 训练集数量
+VAL_COUNT = 1  # 验证集数量
 SEED = 1  # 随机种子
 CROP_GAP = 2  # 裁剪边缘距离
 PADDING_MIN = 4  # 最小边缘距离
@@ -216,10 +219,10 @@ class ImageData:
 
     def get_det(self) -> str:
         data = [{"transcription": self.text, "points": self.points}]
-        return f"{DATASET_IMAGES_PATH.joinpath(self.name)}\t{json.dumps(data, ensure_ascii=False)}"
+        return f"{Path(DATASET_IMAGES_FOLDER_NAME, self.name)}\t{json.dumps(data, ensure_ascii=False)}"
 
     def get_rec(self) -> str:
-        return f"{DATASET_CROP_PATH.joinpath(self.name)}\t{self.text}"
+        return f"{Path(DATASET_CROP_FOLDER_NAME, self.name)}\t{self.text}"
 
     def save_image(self) -> None:
         self.image.save(DATASET_IMAGES_PATH.joinpath(self.name))
