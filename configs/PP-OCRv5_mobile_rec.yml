@@ -2,7 +2,7 @@ Global:
   model_name: PP-OCRv5_mobile_giaa_rec # To use static model for inference.
   debug: true
   use_gpu: true
-  epoch_num: 75
+  epoch_num: 4
   log_smooth_window: 20
   print_batch_step: 10
   save_model_dir: ./output/PP-OCRv5_mobile_giaa_rec
@@ -12,9 +12,9 @@ Global:
   pretrained_model: ./configs/PP-OCRv5_mobile_rec_pretrained.pdparams
   checkpoints:
   save_inference_dir:
-  use_visualdl: false
+  use_visualdl: true
   infer_img: doc/imgs_words/ch/word_1.jpg
-  character_dict_path: onnx/ppocrv5_dict.txt
+  character_dict_path: configs/ppocrv5_dict.txt
   max_text_length: &max_text_length 25
   infer_mode: false
   use_space_char: true
@@ -28,7 +28,7 @@ Optimizer:
   beta2: 0.999
   lr:
     name: Cosine
-    learning_rate: 0.0005
+    learning_rate: 0.0001
     warmup_epoch: 5
   regularizer:
     name: L2
@@ -101,7 +101,7 @@ Train:
   sampler:
     name: MultiScaleSampler
     scales: [[320, 32], [320, 48], [320, 64]]
-    first_bs: &bs 180
+    first_bs: &bs 128
     fix_bs: false
     divided_factor: [8, 16] # w, h
     is_training: True

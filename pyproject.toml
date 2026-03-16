@@ -8,9 +8,14 @@ readme = "README.md"
 dependencies = [
   "albucore>=0.0.24",
   "albumentations>=2.0.8",
+  "argparse>=1.4.0",
+  "colored>=2.3.1",
   "cython>=3.2.4",
+  "dataclasses-json>=0.6.7",
   "lmdb>=1.7.5",
   "numpy<2.4",
+  "onnx-graphsurgeon>=0.5.8",
+  "onnxruntime>=1.24.3",
   "opencv-contrib-python>=4.13.0.92",
   "opencv-python>=4.13.0.92",
   "packaging>=26.0",
@@ -24,6 +29,7 @@ dependencies = [
   "setuptools>=82.0.1",
   "shapely>=2.1.2",
   "tqdm>=4.67.3",
+  "visualdl>=2.5.3",
 ]
 
 [project.optional-dependencies]

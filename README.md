@@ -40,10 +40,15 @@ uv run build_dataset.py
 + [PP-OCRv5_mobile_det_pretrained.pdparams](https://paddle-model-ecology.bj.bcebos.com/paddlex/official_pretrained_model/PP-OCRv5_mobile_det_pretrained.pdparams)
 + [PP-OCRv5_mobile_rec_pretrained.pdparams](https://paddle-model-ecology.bj.bcebos.com/paddlex/official_pretrained_model/PP-OCRv5_mobile_rec_pretrained.pdparams)
 
-### 安装 ccache
+### 安装 ccache 和 screen
 
 ```bash
-sudo apt-get install ccache
+sudo apt-get install ccache # 加速训练
+sudo apt-get install screen # 后台运行
+
+screen -S giaa-train # 新建一个 screen 窗口
+# ... # 执行训练命令
+screen -r giaa-train # 进入 screen 窗口
 ```
 
 ### 开始训练
@@ -52,19 +57,25 @@ sudo apt-get install ccache
 uv run PaddleOCR/tools/train.py -c configs/PP-OCRv5_mobile_det.yml
 uv run PaddleOCR/tools/train.py -c configs/PP-OCRv5_mobile_rec.yml
 ```
+### 启动可视化工具
+
+```bash
+uv run visualdl --logdir output/PP-OCRv5_mobile_giaa_det/vdl_log --port 8800
+uv run visualdl --logdir output/PP-OCRv5_mobile_giaa_rec/vdl_log --port 8800
+```
 
 ### 评估模型
 
 ```bash
-uv run PaddleOCR/tools/eval.py -c configs/PP-OCRv5_mobile_det.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_det/best_model/model.pdparams
-uv run PaddleOCR/tools/eval.py -c configs/PP-OCRv5_mobile_rec.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_rec/best_model/model.pdparams
+uv run PaddleOCR/tools/eval.py -c configs/PP-OCRv5_mobile_det.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_det/latest.pdparams
+uv run PaddleOCR/tools/eval.py -c configs/PP-OCRv5_mobile_rec.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_rec/latest.pdparams
 ```
 
 ### 导出模型
 
 ```bash
-uv run PaddleOCR/tools/export_model.py -c configs/PP-OCRv5_mobile_det.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_det/best_model/model.pdparams Global.save_inference_dir=output/PP-OCRv5_mobile_giaa_det_infer/
-uv run PaddleOCR/tools/export_model.py -c configs/PP-OCRv5_mobile_rec.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_rec/best_model/model.pdparams Global.save_inference_dir=output/PP-OCRv5_mobile_giaa_rec_infer/
+uv run PaddleOCR/tools/export_model.py -c configs/PP-OCRv5_mobile_det.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_det/latest.pdparams Global.save_inference_dir=output/PP-OCRv5_mobile_giaa_det_infer/
+uv run PaddleOCR/tools/export_model.py -c configs/PP-OCRv5_mobile_rec.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_rec/latest.pdparams Global.save_inference_dir=output/PP-OCRv5_mobile_giaa_rec_infer/
 ```
 
 ### 模型转换

@@ -1,33 +1,136 @@
-from pathlib import Path
-from typing import Any, List, Tuple, Union, Dict
-from PIL import Image, ImageFont, ImageDraw
-from enum import Enum
 from dataclasses import dataclass, field
+from typing import (
+    List,
+    Union,
+    Any,
+    Optional,
+    NamedTuple,
+    Tuple,
+    TypeVar,
+    Generic,
+    Type,
+    Dict,
+    Set,
+)
+from pathlib import Path
+from enum import Enum, IntEnum
+from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter, Namespace
 from PaddleOCR.ppocr.utils.logging import get_logger
-import json
-import itertools
-import random
-import cv2
+from dataclasses_json import dataclass_json, LetterCase
+from PIL import Image, ImageFont, ImageDraw
+from functools import reduce
+from copy import deepcopy
 import shutil
+import cv2
+import json
+import random
+import itertools
+import math
 
-TTF_PATH = Path("configs/genshin.ttf")
-DATASET_PATH = Path("dataset/")
-DATASET_CROP_FOLDER_NAME = "crop"
-DATASET_IMAGES_FOLDER_NAME = "images"
-DATASET_IMAGES_PATH = DATASET_PATH.joinpath(DATASET_IMAGES_FOLDER_NAME)
-DATASET_CROP_PATH = DATASET_PATH.joinpath(DATASET_CROP_FOLDER_NAME)
+logger = get_logger("dataset")
 
-BACKGROUND_PATH = Path("configs/background/")
 
-TRAIN_COUNT = 4  # 训练集数量
-VAL_COUNT = 1  # 验证集数量
-SEED = 1  # 随机种子
-CROP_GAP = 2  # 裁剪边缘距离
-PADDING_MIN = 4  # 最小边缘距离
-PADDING_MAX = 40  # 最大边缘距离
-COLOR_OFFSET = 5  # 颜色偏移量
+class ArgsNamespace(Namespace):
+    seed: int
+    genshin_db: Path
+    genshin_ttf: Path
+    background: Path
+    rec_padding: int
+    det_padding: int
+    dataset: Path
+    color_offset: int
+    font_size_offset: int
+    train_count: int
+    val_count: int
 
-logger = get_logger()
+
+class ArgsParser(ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        super(ArgsParser, self, *args, **kwargs).__init__(
+            formatter_class=lambda prog: ArgumentDefaultsHelpFormatter(
+                prog, max_help_position=40, width=120
+            )
+        )
+        self.add_argument("--seed", type=int, default=1, help="Random seed")
+        self.add_argument(
+            "--genshin-db",
+            type=Path,
+            default=Path("genshin-db"),
+            help="Path to Genshin-DB",
+        )
+        self.add_argument(
+            "--genshin-ttf",
+            type=Path,
+            default=Path("configs/genshin.ttf"),
+            help="Path to Genshin font",
+        )
+        self.add_argument(
+            "--background",
+            type=Path,
+            default=Path("configs/background/"),
+            help="Path to Background videos",
+        )
+        self.add_argument(
+            "--rec-padding",
+            type=int,
+            default=3,
+            help="Padding for recognition",
+        )
+        self.add_argument(
+            "--det-padding",
+            type=int,
+            default=16,
+            help="Padding for detection",
+        )
+        self.add_argument(
+            "--dataset",
+            type=Path,
+            default=Path("dataset"),
+            help="Path to dataset",
+        )
+        self.add_argument(
+            "--color-offset",
+            type=int,
+            default=5,
+            help="Color offset for random color",
+        )
+        self.add_argument(
+            "--font-size-offset",
+            type=int,
+            default=2,
+            help="Font size offset for random font size",
+        )
+        self.add_argument(
+            "--train-count",
+            type=int,
+            default=8,
+            help="Number of training images",
+        )
+        self.add_argument(
+            "--val-count",
+            type=int,
+            default=2,
+            help="Number of validation images",
+        )
+
+    def parse_args(self, *args, **kwargs) -> ArgsNamespace:
+        return super(ArgsParser, self).parse_args(*args, **kwargs)
+
+
+args = ArgsParser().parse_args()
+logger.info(f"Args: {args}")
+crop_img_name = "crop_img"
+images_name = "images"
+crop_img = args.dataset.joinpath(crop_img_name)
+images = args.dataset.joinpath(images_name)
+
+
+class IdGenerator:
+    def __init__(self, start: int = 1):
+        self.id_counter = itertools.count(start=start, step=1)
+
+    def __call__(self) -> int:
+        return next(self.id_counter)
 
 
 def read_file(file: Path) -> str:
@@ -35,48 +138,43 @@ def read_file(file: Path) -> str:
         return f.read()
 
 
-def read_json(file: Path) -> Any:
-    return json.loads(read_file(file))
-
-
 def write_file(file: Path, content: str) -> None:
     with open(file, "w", encoding="utf-8") as f:
         f.write(content)
 
 
-def points_to_bbox(points: List[Tuple[int, int]]) -> Tuple[int, int, int, int]:
-    return tuple(
-        [
-            min(p[0] for p in points),
-            min(p[1] for p in points),
-            max(p[0] for p in points),
-            max(p[1] for p in points),
-        ]
-    )
-
-
-def image_crop(image: Image.Image, points: List[Tuple[int, int]]) -> Image.Image:
-    return image.crop(points_to_bbox(points))
-
-
-seed_counter = itertools.count(start=SEED, step=1)
+seed_counter = IdGenerator(args.seed)
 
 
 def random_randint(a: int, b: int) -> int:
-    random.seed(next(seed_counter))
+    random.seed(seed_counter())
     return random.randint(a, b)
 
 
 def random_uniform(a: float, b: float) -> float:
-    random.seed(next(seed_counter))
+    random.seed(seed_counter())
     return random.uniform(a, b)
 
 
-id_counter = itertools.count(start=1, step=1)
+L = TypeVar("L")
 
 
-def id() -> int:
-    return next(id_counter)
+def random_shuffle(arr: List[L]) -> List[L]:
+    random.seed(seed_counter())
+    random.shuffle(arr)
+    return arr
+
+
+def random_color(
+    base: Tuple[int, int, int], offset: int = args.color_offset
+) -> Tuple[int, int, int]:
+    return tuple(
+        max(0, min(255, base[i] + random_randint(-offset, offset))) for i in range(3)
+    )
+
+
+def random_font_size(base: int, offset: int = 10) -> int:
+    return max(1, base + random_randint(-offset, offset))
 
 
 def flatten(*args: List[Any]) -> List[Any]:
@@ -89,21 +187,15 @@ def flatten(*args: List[Any]) -> List[Any]:
     return result
 
 
-def random_padding(
-    min: int = PADDING_MIN, max: int = PADDING_MAX
-) -> Tuple[int, int, int, int]:
-    return tuple(random_randint(min, max) for _ in range(4))
+class Slot(Enum):
+    FLOWER = "生之花"
+    PLUME = "死之羽"
+    SANDS = "时之沙"
+    GOBLET = "空之杯"
+    CIRCLET = "理之冠"
 
 
-def random_color(
-    base: Tuple[int, int, int], offset: int = COLOR_OFFSET
-) -> Tuple[int, int, int]:
-    return tuple(
-        max(0, min(255, base[i] + random_randint(-offset, offset))) for i in range(3)
-    )
-
-
-class Element(Enum):
+class ElementText(Enum):
     NONE = "无"
     PYRO = "火"
     HYDRO = "水"
@@ -114,307 +206,418 @@ class Element(Enum):
     DENDRO = "草"
 
 
-class ArtifactTier(Enum):
-    GOLD = "金"
-    PURPLE = "紫"
-    BLUE = "蓝"
-    GREEN = "绿"
-    WHITE = "白"
-
-    @classmethod
-    def from_rarity_list(cls, rarity_list: List[int]) -> List["ArtifactTier"]:
-        mapping = {
-            5: cls.GOLD,
-            4: cls.PURPLE,
-            3: cls.BLUE,
-            2: cls.GREEN,
-            1: cls.WHITE,
-        }
-        return [mapping.get(rarity, cls.WHITE) for rarity in rarity_list]
+class Rarity(IntEnum):
+    GOLD = 5
+    PURPLE = 4
+    BLUE = 3
+    GREEN = 2
+    WHITE = 1
 
 
-class Part(Enum):
-    FLOWER = "生之花"
-    PLUME = "死之羽"
-    SANDS = "时之沙"
-    GOBLET = "空之杯"
-    CIRCLET = "理之冠"
+T = TypeVar("T", bound=Union[int, float])
 
 
-class ArtifactAttribute(Enum):
-    HP = ["生命值", int, [717, 4780]]
-    HP_PERCENT = ["生命值", float, [7.0, 46.6]]
-    ATK = ["攻击力", int, [47, 311]]
-    ATK_PERCENT = ["攻击力", float, [7.0, 46.6]]
-    DEF_PERCENT = ["防御力", float, [8.7, 58.3]]
-    ENERGY_RECHARGE = ["元素充能效率", float, [7.8, 51.8]]
-    ELEMENTAL_MASTERY = ["元素精通", int, [28, 187]]
-    CRIT_RATE = ["暴击率", float, [4.7, 31.1]]
-    CRIT_DMG = ["暴击伤害", float, [9.4, 62.2]]
-    HEALING_BONUS = ["治疗加成", float, [5.4, 35.9]]
-    PHYSICAL_DMG_BONUS = ["物理伤害加成", float, [8.7, 58.3]]
-    PYRO_BONUS = ["火元素伤害加成", float, [7.0, 46.6]]
-    HYDRO_BONUS = ["水元素伤害加成", float, [7.0, 46.6]]
-    ELECTRO_BONUS = ["雷元素伤害加成", float, [7.0, 46.6]]
-    GEO_BONUS = ["岩元素伤害加成", float, [7.0, 46.6]]
-    ANEMO_BONUS = ["风元素伤害加成", float, [7.0, 46.6]]
-    CRYO_BONUS = ["冰元素伤害加成", float, [7.0, 46.6]]
-    DENDRO_BONUS = ["草元素伤害加成", float, [7.0, 46.6]]
+class AffixInfo(NamedTuple, Generic[T]):
+    name: str
+    type: Type[T]
+    range: Tuple[T, T]
+
+
+class Affix(Enum):
+    HP = AffixInfo("生命值", int, [717, 4780])
+    HP_PERCENT = AffixInfo("生命值", float, [7.0, 46.6])
+    ATK = AffixInfo("攻击力", int, [47, 311])
+    ATK_PERCENT = AffixInfo("攻击力", float, [7.0, 46.6])
+    DEF_PERCENT = AffixInfo("防御力", float, [8.7, 58.3])
+    ENERGY_RECHARGE = AffixInfo("元素充能效率", float, [7.8, 51.8])
+    ELEMENTAL_MASTERY = AffixInfo("元素精通", int, [28, 187])
+    CRIT_RATE = AffixInfo("暴击率", float, [4.7, 31.1])
+    CRIT_DMG = AffixInfo("暴击伤害", float, [9.4, 62.2])
+    HEALING_BONUS = AffixInfo("治疗加成", float, [5.4, 35.9])
+    PHYSICAL_DMG_BONUS = AffixInfo("物理伤害加成", float, [8.7, 58.3])
+    PYRO_BONUS = AffixInfo("火元素伤害加成", float, [7.0, 46.6])
+    HYDRO_BONUS = AffixInfo("水元素伤害加成", float, [7.0, 46.6])
+    ELECTRO_BONUS = AffixInfo("雷元素伤害加成", float, [7.0, 46.6])
+    GEO_BONUS = AffixInfo("岩元素伤害加成", float, [7.0, 46.6])
+    ANEMO_BONUS = AffixInfo("风元素伤害加成", float, [7.0, 46.6])
+    CRYO_BONUS = AffixInfo("冰元素伤害加成", float, [7.0, 46.6])
+    DENDRO_BONUS = AffixInfo("草元素伤害加成", float, [7.0, 46.6])
 
     @property
-    def artifact_name(self) -> Union[int, float]:
-        return self.value[0]
-
-    @property
-    def range(self) -> List[Union[int, float]]:
-        return self.value[2]
+    def name(self) -> str:
+        return self.value.name
 
     @property
     def type(self) -> type:
-        return self.value[1]
+        return self.value.type
 
     def random_value(self) -> str:
         if issubclass(self.type, int):
-            return str(random_randint(self.range[0], self.range[1]))
+            return str(random_randint(self.value.range[0], self.value.range[1]))
         elif issubclass(self.type, float):
-            return f"{round(random_uniform(self.range[0], self.range[1]), 1)}%"
+            return (
+                f"{round(random_uniform(self.value.range[0], self.value.range[1]), 1)}%"
+            )
         else:
             raise ValueError("Invalid attribute type")
 
     def random_name_value(self) -> str:
         value = ""
         if issubclass(self.type, int):
-            value = str(random_randint(self.range[0], self.range[1]))
+            value = str(random_randint(self.value.range[0], self.value.range[1]))
         elif issubclass(self.type, float):
-            value = f"{round(random_uniform(self.range[0], self.range[1]), 1)}%"
+            value = (
+                f"{round(random_uniform(self.value.range[0], self.value.range[1]), 1)}%"
+            )
         else:
             raise ValueError("Invalid attribute type")
-        return f"{self.artifact_name}+{value}"
+        return f"{self.name}+{value}"
 
     def random_unactivated_name_value(self) -> str:
         return f"{self.random_name_value()} (待激活)"
 
     def random_unactivated_name(self) -> str:
-        return f"{self.artifact_name} (待激活)"
+        return f"{self.name} (待激活)"
 
 
-class GenshinDB:
-    def __init__(self):
-        self.data_root_path = Path("genshin-db/src/data/ChineseSimplified/")
-
-    def read_files(self, folder: str) -> List[Any]:
-        return [
-            read_json(file)
-            for file in self.data_root_path.joinpath(folder).glob("*.json")
-        ]
+Color = Tuple[int, int, int]
+StarrySky = Union[ElementText, Rarity]
+Background = Union[StarrySky, Color]
 
 
+@dataclass_json(letter_case=LetterCase.CAMEL)
 @dataclass
-class ImageData:
-    text: str
-    image: Image.Image
-    image_crop: Image.Image
-    points: List[Tuple[int, int]]
+class CharacterJson:
+    name: str
+    element_text: ElementText
+
+
+@dataclass_json(letter_case=LetterCase.CAMEL)
+@dataclass
+class ArtifactSlotJson:
     name: str
 
-    def get_det(self) -> str:
-        data = [{"transcription": self.text, "points": self.points}]
-        return f"{Path(DATASET_IMAGES_FOLDER_NAME, self.name)}\t{json.dumps(data, ensure_ascii=False)}"
 
-    def get_rec(self) -> str:
-        return f"{Path(DATASET_CROP_FOLDER_NAME, self.name)}\t{self.text}"
-
-    def save_image(self) -> None:
-        self.image.save(DATASET_IMAGES_PATH.joinpath(self.name))
-        self.image_crop.save(DATASET_CROP_PATH.joinpath(self.name))
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.name}, {self.text}, {self.points})"
-
-    def __post_init__(self) -> None:
-        self.name = f"{str(self.name).zfill(7)}.png"
-
-
+@dataclass_json(letter_case=LetterCase.CAMEL)
 @dataclass
-class BuildOption:
-    id: int = field(default_factory=id)
-    text: str = "Genshin Impact"
-    font_size: int = 12
-    # (r, g, b)
-    color: Tuple[int, int, int] = (0, 0, 0)
-    # (left, top, right, bottom)
-    padding: Tuple[int, int, int, int] = (0, 0, 0, 0)
+class ArtifactJson:
+    name: str
+    rarity_list: List[Rarity]
 
-    def __post_init__(self) -> None:
-        self.color = random_color(self.color)
-        self.padding = random_padding()
-        logger.info(self)
+    flower: Optional[ArtifactSlotJson] = None
+    plume: Optional[ArtifactSlotJson] = None
+    sands: Optional[ArtifactSlotJson] = None
+    goblet: Optional[ArtifactSlotJson] = None
+    circlet: Optional[ArtifactSlotJson] = None
 
 
-@dataclass
-class PlainBuildOption(BuildOption):
-    background: Tuple[int, int, int] = (255, 255, 255)
+class GenshinDatabase:
+    def __init__(self):
+        self.chinese_simplified = args.genshin_db.joinpath(
+            "src/data/ChineseSimplified/"
+        )
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        self.background = random_color(self.background)
+    def read_files(self, folder: str) -> List[str]:
+        return [
+            read_file(file)
+            for file in self.chinese_simplified.joinpath(folder).glob("*.json")
+        ]
 
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(id={self.id}, text={self.text}, font_size={self.font_size}, color={self.color}, padding={self.padding}, background={self.background})"
+    def read_characters(self) -> List[CharacterJson]:
+        return [CharacterJson.from_json(file) for file in self.read_files("characters")]
 
-
-SkyBackgroundType = Union[Element, ArtifactTier]
-
-
-@dataclass
-class SkyBuildOption(BuildOption):
-    background: SkyBackgroundType = Element.NONE
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(id={self.id}, text={self.text}, font_size={self.font_size}, color={self.color}, padding={self.padding}, background={self.background})"
+    def read_artifacts(self) -> List[ArtifactJson]:
+        return [ArtifactJson.from_json(file) for file in self.read_files("artifacts")]
 
 
-@dataclass
-class SkyBackground:
-    name: str = ""
-    width: int = 0
-    height: int = 0
-    frames: int = 0
-    cap: cv2.VideoCapture = None
+database = GenshinDatabase()
 
-    def __post_init__(self) -> None:
-        self.cap = cv2.VideoCapture(BACKGROUND_PATH.joinpath(f"{self.name}.mp4"))
+
+class StarrySkyVideo:
+    def __init__(self, name: str):
+        self.name = name
+        self.cap = cv2.VideoCapture(args.background.joinpath(f"{name}.mp4"))
         self.frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(name={self.name}, width={self.width}, height={self.height}, frames={self.frames})"
+
+class StarrySkyManager:
+    def __init__(self):
+        self.starry_skies: Dict[StarrySky, StarrySkyVideo] = {}
+        for file in args.background.glob("*.mp4"):
+            name = file.stem
+            video = StarrySkyVideo(name)
+            if name.upper() in ElementText.__members__:
+                self.starry_skies[ElementText[name.upper()]] = video
+            elif name.upper() in Rarity.__members__:
+                self.starry_skies[Rarity[name.upper()]] = video
+
+    def get_starry_sky_video(self, starry_sky: StarrySky) -> StarrySkyVideo:
+        return self.starry_skies[starry_sky]
+
+    def get_random_frame(self, starry_sky: StarrySky) -> Image.Image:
+        video = self.get_starry_sky_video(starry_sky)
+        frame_index = random_randint(0, video.frames - 1)
+        video.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ret, frame = video.cap.read()
+        if not ret:
+            raise ValueError("Failed to read frame")
+        return Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
+    @property
+    def min_width(self) -> int:
+        return min(video.width for video in self.starry_skies.values())
+
+    @property
+    def min_height(self) -> int:
+        return min(video.height for video in self.starry_skies.values())
 
 
-backgrounds: Dict[str, SkyBackground] = {}
-
-GenerateImageOption = Union[PlainBuildOption, SkyBuildOption]
+starry_sky_manager = StarrySkyManager()
 
 
-def generate_image(option: GenerateImageOption) -> ImageData:
-    font = ImageFont.truetype(TTF_PATH, option.font_size)
-    bbox = font.getbbox(option.text)
-    width = bbox[2] - bbox[0] + option.padding[0] + option.padding[2]
-    height = bbox[3] - bbox[1] + option.padding[1] + option.padding[3]
+@dataclass
+class Blueprint:
+    text: str
+    color: Color
+    font_size: int
+    background: Background
 
-    if isinstance(option, SkyBuildOption):
-        sky_background = backgrounds.get(option.background.name.lower())
-        if not sky_background:
-            raise ValueError(f"Invalid sky background: {option.background}")
-        frame_index = random_randint(0, sky_background.frames - 1)
-        sky_background.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-        _, frame = sky_background.cap.read()
-        sky_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    def __post_init__(self):
+        self.color = random_color(self.color)
+        self.font_size = random_font_size(self.font_size, args.font_size_offset)
+        logger.debug(self)
 
-        # 将图片随机画到图片上
-        start_x = random_randint(0, sky_background.width - width)
-        start_y = random_randint(0, sky_background.height - height)
 
-        image = Image.fromarray(sky_frame)
-        image = image_crop(
-            image, [(start_x, start_y), (start_x + width, start_y + height)]
+# left, top, width, height
+Rect = Tuple[float, float, float, float]
+
+
+@dataclass
+class BlueprintBrick:
+    rect: Rect
+    blueprint: Blueprint
+
+    @property
+    def points(self) -> List[Tuple[int, int]]:
+        left, upper, right, lower = self.box
+        return [[left, upper], [right, upper], [right, lower], [left, lower]]
+
+    @property
+    def box(self) -> Tuple[int, int, int, int]:
+        return (
+            max(0, math.floor(self.rect[0] - args.rec_padding)),
+            max(0, math.floor(self.rect[1] - args.rec_padding)),
+            min(
+                starry_sky_manager.min_width,
+                math.ceil(self.rect[0] + self.rect[2] + args.rec_padding),
+            ),
+            min(
+                starry_sky_manager.min_height,
+                math.ceil(self.rect[1] + self.rect[3] + args.rec_padding),
+            ),
         )
-    else:
-        image = Image.new("RGB", (width, height), option.background)
-
-    draw = ImageDraw.Draw(image)
-
-    draw.text(
-        (option.padding[0] - bbox[0], option.padding[1] - bbox[1]),
-        text=option.text,
-        font=font,
-        fill=option.color,
-    )
-    start_x = option.padding[0] - CROP_GAP
-    start_y = option.padding[1] - CROP_GAP
-    end_x = width - option.padding[2] + CROP_GAP
-    end_y = height - option.padding[3] + CROP_GAP
-    points = [(start_x, start_y), (end_x, start_y), (end_x, end_y), (start_x, end_y)]
-    return ImageData(
-        name=option.id,
-        text=option.text,
-        image=image,
-        image_crop=image_crop(image, points),
-        points=points,
-    )
 
 
-class ImageGenerator:
+@dataclass
+class Rec:
+    brick: BlueprintBrick
+    image: Image.Image
+    id: int = field(default_factory=IdGenerator())
+
+    @property
+    def image_hash(self) -> str:
+        return str(hash(self.image.tobytes()))
+
+    @property
+    def filename(self) -> str:
+        return f"{str(self.id).zfill(7)}.png"
+
+    @property
+    def label_line(self) -> str:
+        return f"{Path(crop_img_name).joinpath(self.filename)}\t{self.brick.blueprint.text}"
+
+    def save(self) -> None:
+        self.image.save(f"{crop_img.joinpath(self.filename)}")
+
+
+@dataclass
+class Det:
+    bricks: List[BlueprintBrick]
+    image: Image.Image
+    id: int = field(default_factory=IdGenerator())
+
+    @property
+    def filename(self) -> str:
+        return f"{str(self.id).zfill(7)}.png"
+
+    @property
+    def label_line(self) -> str:
+        data = [
+            {"transcription": brick.blueprint.text, "points": brick.points}
+            for brick in self.bricks
+        ]
+        return f"{Path(images_name).joinpath(self.filename)}\t{json.dumps(data, ensure_ascii=False)}"
+
+    def save(self) -> None:
+        self.image.save(f"{images.joinpath(self.filename)}")
+
+    @property
+    def recs(self) -> List[Rec]:
+        return [Rec(brick, self.image.crop(brick.box)) for brick in self.bricks]
+
+
+class ImageBuilder:
+    def __init__(self, blueprints: List[Blueprint]):
+        self.blueprints = blueprints
+        self.blueprint_groups: Dict[Background, List[Blueprint]] = reduce(
+            lambda acc, blueprint: {
+                **acc,
+                blueprint.background: acc.get(blueprint.background, []) + [blueprint],
+            },
+            blueprints,
+            {},
+        )
+
+    def group_blueprints(
+        self, blueprints: List[Blueprint]
+    ) -> List[List[BlueprintBrick]]:
+        result: List[List[BlueprintBrick]] = []
+        filled_height = 0
+        item: List[BlueprintBrick] = []
+        while len(blueprints) > 0:
+            blueprint = blueprints.pop(0)
+            font = ImageFont.truetype(args.genshin_ttf, blueprint.font_size)
+            bbox = font.getbbox(blueprint.text)
+            assert bbox[2] <= starry_sky_manager.min_width
+            filled_height += bbox[3]
+            item.append(
+                BlueprintBrick(
+                    (
+                        0,
+                        0,
+                        bbox[2],
+                        bbox[3],
+                    ),
+                    blueprint,
+                )
+            )
+            interval = (starry_sky_manager.min_height - filled_height) / (len(item) + 1)
+            if (
+                filled_height > starry_sky_manager.min_height
+                or len(blueprints) == 0
+                or interval < args.det_padding
+            ):
+                y = interval
+                for i, brick in enumerate(item):
+                    brick.rect = (
+                        random_uniform(
+                            args.rec_padding,
+                            starry_sky_manager.min_width
+                            - brick.rect[2]
+                            - args.rec_padding,
+                        ),
+                        y,
+                        brick.rect[2],
+                        brick.rect[3],
+                    )
+                    y += interval + brick.rect[3]
+                result.append(item)
+                item = []
+                filled_height = 0
+        return result
+
+    def build_det(self, bricks: List[BlueprintBrick], background: Background) -> Det:
+        if isinstance(background, StarrySky):
+            image = starry_sky_manager.get_random_frame(background)
+        else:
+            image = Image.new(
+                "RGB",
+                (starry_sky_manager.min_width, starry_sky_manager.min_height),
+                background,
+            )
+        draw = ImageDraw.Draw(image)
+        for brick in bricks:
+            font = ImageFont.truetype(args.genshin_ttf, brick.blueprint.font_size)
+            draw.text(
+                brick.rect[:2],
+                text=brick.blueprint.text,
+                font=font,
+                fill=brick.blueprint.color,
+            )
+        return Det(bricks, image)
+
+    def build(self) -> List[Det]:
+        result: List[Det] = []
+        for background, blueprints in self.blueprint_groups.items():
+            for bricks in self.group_blueprints(random_shuffle(deepcopy(blueprints))):
+                det = self.build_det(bricks, background)
+                logger.debug(f"Generated {det}")
+                result.append(det)
+        return result
+
+
+class Generator:
     def __init__(self, text: str):
         self.text = text
 
-    def generate(self) -> List[GenerateImageOption]:
-        pass
-
-    def generate_train(self) -> List[GenerateImageOption]:
-        return flatten([self.generate() for _ in range(TRAIN_COUNT)])
-
-    def generate_val(self) -> List[GenerateImageOption]:
-        return flatten([self.generate() for _ in range(VAL_COUNT)])
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.text})"
+    def generate(self) -> List[Blueprint]:
+        raise NotImplementedError()
 
 
-class CharacterImageGenerator(ImageGenerator):
-    def __init__(self, text: str, element: Element):
-        super().__init__(text)
-        self.element = element
+class CharacterImageGenerator(Generator):
+    def __init__(self, character: CharacterJson):
+        super().__init__(character.name)
+        self.character = character
 
-    def generate_sky(self) -> GenerateImageOption:
-        return SkyBuildOption(
+    def generate_sky(self) -> Blueprint:
+        return Blueprint(
             text=self.text,
             font_size=22,
             color=(211, 188, 142),
-            background=self.element,
+            background=self.character.element_text,
         )
 
-    def generate_equipped(self) -> GenerateImageOption:
-        return PlainBuildOption(
+    def generate_equipped(self) -> Blueprint:
+        return Blueprint(
             text=f"{self.text}已装备",
             font_size=42,
             color=(73, 83, 102),
             background=(255, 231, 187),
         )
 
-    def generate(self) -> List[GenerateImageOption]:
+    def generate(self) -> List[Blueprint]:
         # 排除主角, 奇偶
-        if self.element == Element.NONE:
+        if self.character.element_text == ElementText.NONE:
             return []
         return [self.generate_sky(), self.generate_equipped()]
 
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.text}, {self.element})"
 
-
-class ArtifactImageGenerator(ImageGenerator):
-    def __init__(self, text: str, tiers: List[ArtifactTier], part_names: List[str]):
+class ArtifactImageGenerator(Generator):
+    def __init__(
+        self, text: str, rarities: List[Rarity], slots: List[ArtifactSlotJson]
+    ):
         super().__init__(text)
-        self.tiers = tiers
-        self.part_names = part_names
-        self.tier_background: Dict[ArtifactTier, Tuple[int, int, int]] = {
-            ArtifactTier.WHITE: (112, 118, 138),
-            ArtifactTier.GREEN: (42, 142, 113),
-            ArtifactTier.BLUE: (80, 126, 201),
-            ArtifactTier.PURPLE: (159, 85, 222),
-            ArtifactTier.GOLD: (186, 105, 52),
+        self.rarities = rarities
+        self.slots = slots
+        self.rarity_background: Dict[Rarity, Tuple[int, int, int]] = {
+            Rarity.WHITE: (112, 118, 138),
+            Rarity.GREEN: (42, 142, 113),
+            Rarity.BLUE: (80, 126, 201),
+            Rarity.PURPLE: (159, 85, 222),
+            Rarity.GOLD: (186, 105, 52),
         }
 
-    def generate_part(self) -> List[GenerateImageOption]:
-        result: List[GenerateImageOption] = []
+    def generate_part(self) -> List[Blueprint]:
+        result: List[Blueprint] = []
 
-        for part_name in self.part_names:
-            for tier in self.tiers:
-                background = self.tier_background.get(tier)
+        for slot in self.slots:
+            for rarity in self.rarities:
+                background = self.rarity_background.get(rarity)
                 result.append(
-                    PlainBuildOption(
-                        text=part_name,
+                    Blueprint(
+                        text=slot.name,
                         font_size=30,
                         color=(255, 255, 255),
                         background=background,
@@ -423,25 +626,25 @@ class ArtifactImageGenerator(ImageGenerator):
 
         return result
 
-    def generate_set(self) -> GenerateImageOption:
-        return PlainBuildOption(
+    def generate_set(self) -> Blueprint:
+        return Blueprint(
             text=self.text,
             font_size=22,
             color=(92, 178, 86),
             background=(236, 229, 216),
         )
 
-    def generate_filter(self) -> List[GenerateImageOption]:
+    def generate_filter(self) -> List[Blueprint]:
         return [
             # 可选
-            PlainBuildOption(
+            Blueprint(
                 text=self.text,
                 font_size=22,
                 color=(236, 229, 216),
                 background=(44, 56, 66),
             ),
             # 不可选
-            PlainBuildOption(
+            Blueprint(
                 text=self.text,
                 font_size=22,
                 color=(127, 129, 133),
@@ -449,132 +652,123 @@ class ArtifactImageGenerator(ImageGenerator):
             ),
         ]
 
-    def generate(self) -> List[GenerateImageOption]:
+    def generate(self) -> List[Blueprint]:
         return flatten(
             self.generate_part(), self.generate_set(), self.generate_filter()
         )
 
-    def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}({self.text}, {self.tiers}, {self.part_names})"
-        )
 
-
-class ArtifactTierImageGenerator(ImageGenerator):
-    def __init__(self, text: str, tier: ArtifactTier):
+class ArtifactRarityImageGenerator(Generator):
+    def __init__(self, text: str, rarity: Rarity):
         super().__init__(text)
-        self.tier = tier
-        self.tier_background: Dict[ArtifactTier, Tuple[int, int, int]] = {
-            ArtifactTier.WHITE: (79, 87, 98),
-            ArtifactTier.GREEN: (74, 90, 94),
-            ArtifactTier.BLUE: (81, 85, 119),
-            ArtifactTier.PURPLE: (94, 88, 134),
-            ArtifactTier.GOLD: (110, 86, 83),
+        self.rarity = rarity
+        self.rarity_background: Dict[Rarity, Tuple[int, int, int]] = {
+            Rarity.WHITE: (79, 87, 98),
+            Rarity.GREEN: (74, 90, 94),
+            Rarity.BLUE: (81, 85, 119),
+            Rarity.PURPLE: (94, 88, 134),
+            Rarity.GOLD: (110, 86, 83),
         }
-        self.background = self.tier_background.get(self.tier)
-        self.sky_background = backgrounds.get(self.tier.name.lower())
 
-    def generate_part(self) -> List[GenerateImageOption]:
+    def generate_slot(self) -> List[Blueprint]:
         return [
-            PlainBuildOption(
-                text=part.value,
+            Blueprint(
+                text=slot.value,
                 font_size=30,
                 color=(255, 255, 255),
-                background=self.background,
+                background=self.rarity_background.get(self.rarity),
             )
-            for part in Part
+            for slot in Slot
         ]
 
-    def generate_main_attribute(self) -> GenerateImageOption:
-        result: List[GenerateImageOption] = []
-        for attribute in ArtifactAttribute:
+    def generate_main_attribute(self) -> Blueprint:
+        result: List[Blueprint] = []
+        background = self.rarity_background.get(self.rarity)
+        for affix in Affix:
             # 词条
             result.append(
-                PlainBuildOption(
-                    text=attribute.artifact_name,
+                Blueprint(
+                    text=affix.name,
                     font_size=20,
                     color=(188, 178, 206),
-                    background=self.background,
+                    background=background,
                 )
             )
             # 词条值
             result.append(
-                PlainBuildOption(
-                    text=attribute.random_value(),
+                Blueprint(
+                    text=affix.random_value(),
                     font_size=38,
                     color=(255, 255, 255),
-                    background=self.background,
+                    background=background,
                 )
             )
 
         return result
 
-    def generate_sky_unactivated_attribute(self) -> GenerateImageOption:
-        result: List[GenerateImageOption] = []
-        for attribute in ArtifactAttribute:
+    def generate_sky_unactivated_attribute(self) -> Blueprint:
+        result: List[Blueprint] = []
+        for affix in Affix:
             # 待激活词条
             result.append(
-                SkyBuildOption(
-                    text=attribute.random_unactivated_name(),
+                Blueprint(
+                    text=affix.random_unactivated_name(),
                     font_size=27,
                     color=(181, 164, 149),
-                    background=self.sky_background,
+                    background=self.rarity,
                 )
             )
             # 强化词条值
             result.append(
-                SkyBuildOption(
-                    text=attribute.random_value(),
+                Blueprint(
+                    text=affix.random_value(),
                     font_size=27,
                     color=(181, 164, 149),
-                    background=self.sky_background,
+                    background=self.rarity,
                 )
             )
 
         return result
 
-    def generate_sky_attribute(self) -> GenerateImageOption:
-        result: List[GenerateImageOption] = []
-        for attribute in ArtifactAttribute:
+    def generate_sky_attribute(self) -> Blueprint:
+        result: List[Blueprint] = []
+        for affix in Affix:
             # 强化词条值
             result.append(
-                SkyBuildOption(
-                    text=attribute.artifact_name,
+                Blueprint(
+                    text=affix.name,
                     font_size=27,
                     color=(255, 255, 255),
-                    background=self.sky_background,
+                    background=self.rarity,
                 )
             )
             # 强化词条值
             result.append(
-                SkyBuildOption(
-                    text=attribute.random_value(),
+                Blueprint(
+                    text=affix.random_value(),
                     font_size=27,
                     color=(255, 255, 255),
-                    background=self.sky_background,
+                    background=self.rarity,
                 )
             )
         return result
 
-    def generate(self) -> List[GenerateImageOption]:
+    def generate(self) -> List[Blueprint]:
         return flatten(
-            self.generate_part(),
+            self.generate_slot(),
             self.generate_main_attribute(),
             self.generate_sky_attribute(),
             self.generate_sky_unactivated_attribute(),
         )
 
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.text}, {self.tier})"
 
-
-class ArtifactCommonImageGenerator(ImageGenerator):
+class ArtifactCommonImageGenerator(Generator):
     def __init__(self):
         super().__init__("")
 
-    def generate_level(self) -> List[GenerateImageOption]:
+    def generate_level(self) -> List[Blueprint]:
         return [
-            PlainBuildOption(
+            Blueprint(
                 text=f"+{i}",
                 font_size=22,
                 color=(255, 255, 255),
@@ -583,146 +777,142 @@ class ArtifactCommonImageGenerator(ImageGenerator):
             for i in range(1, 21)
         ]
 
-    def generate_attribute(self) -> List[GenerateImageOption]:
+    def generate_attribute(self) -> List[Blueprint]:
         return [
-            PlainBuildOption(
-                text=attribute.random_name_value(),
-                font_size=38,
+            Blueprint(
+                text=affix.random_name_value(),
+                font_size=22,
                 color=(73, 83, 102),
                 background=(236, 229, 216),
             )
-            for attribute in ArtifactAttribute
+            for affix in Affix
         ]
 
-    def generate_unactivated_attribute(self) -> List[GenerateImageOption]:
+    def generate_unactivated_attribute(self) -> List[Blueprint]:
         return [
-            PlainBuildOption(
-                text=attribute.random_unactivated_name_value(),
-                font_size=38,
+            Blueprint(
+                text=affix.random_unactivated_name_value(),
+                font_size=22,
                 color=(154, 156, 159),
                 background=(236, 229, 216),
             )
-            for attribute in ArtifactAttribute
+            for affix in Affix
         ]
 
-    def generate(self) -> List[GenerateImageOption]:
+    def generate_sanctifying_elixir(self) -> Blueprint:
+        return Blueprint(
+            text="祝圣之霜定义",
+            font_size=20,
+            color=(102, 61, 153),
+            background=(220, 192, 255),
+        )
+
+    def generate_training_guide(self) -> Blueprint:
+        return Blueprint(
+            text="提升指南",
+            font_size=22,
+            color=(59, 66, 85),
+            background=(236, 229, 216),
+        )
+
+    def generate(self) -> List[Blueprint]:
         return flatten(
             self.generate_level(),
             self.generate_attribute(),
             self.generate_unactivated_attribute(),
+            self.generate_sanctifying_elixir(),
+            self.generate_training_guide(),
         )
 
 
-class DataParser:
-    def parser(self) -> List[ImageGenerator]:
+class Parser:
+    def parser(self) -> List[Generator]:
         raise NotImplementedError()
 
 
-class CharacterParser(DataParser):
-    def __init__(self, db: GenshinDB):
-        self.db = db
-
-    def parser(self) -> List[ImageGenerator]:
+class CharacterParser(Parser):
+    def parser(self) -> List[Generator]:
         return [
-            CharacterImageGenerator(
-                character["name"], Element(character["elementText"])
-            )
-            for character in self.db.read_files("characters")
+            CharacterImageGenerator(character)
+            for character in database.read_characters()
         ]
 
 
-class ArtifactParser(DataParser):
-    def __init__(self, db: GenshinDB):
-        self.db = db
-
-    def parser(self) -> List[ImageGenerator]:
+class ArtifactParser(Parser):
+    def parser(self) -> List[Generator]:
         result = []
-        for artifact in self.db.read_files("artifacts"):
-            part_names = []
-            for part in Part:
-                part_json = artifact.get(part.name.lower())
-                if part_json is not None:
-                    part_names.append(part_json["name"])
-
+        for artifact in database.read_artifacts():
             result.append(
                 ArtifactImageGenerator(
-                    artifact["name"],
-                    ArtifactTier.from_rarity_list(artifact["rarityList"]),
-                    part_names,
+                    artifact.name,
+                    [Rarity(rarity) for rarity in artifact.rarity_list],
+                    [
+                        getattr(artifact, slot.name.lower())
+                        for slot in Slot
+                        if getattr(artifact, slot.name.lower()) is not None
+                    ],
                 )
             )
         return result
 
 
-class ArtifactTierParser(DataParser):
-    def parser(self) -> List[ImageGenerator]:
-        return [ArtifactTierImageGenerator(tier.value, tier) for tier in ArtifactTier]
+class ArtifactTierParser(Parser):
+    def parser(self) -> List[Generator]:
+        return [ArtifactRarityImageGenerator(rarity.value, rarity) for rarity in Rarity]
 
 
-class ArtifactCommonParser(DataParser):
-    def parser(self) -> List[ImageGenerator]:
+class ArtifactCommonParser(Parser):
+    def parser(self) -> List[Generator]:
         return [ArtifactCommonImageGenerator()]
 
 
-def init_dataset() -> None:
-    global backgrounds
-
-    if DATASET_PATH.exists():
+def init() -> None:
+    if args.dataset.exists():
         logger.info("Dataset already exists, removing...")
-        shutil.rmtree(DATASET_PATH)
-    DATASET_PATH.mkdir(parents=True, exist_ok=True)
-    DATASET_IMAGES_PATH.mkdir(parents=True, exist_ok=True)
-    DATASET_CROP_PATH.mkdir(parents=True, exist_ok=True)
-
-    logger.info("Loading backgrounds videos...")
-    for file in BACKGROUND_PATH.glob("*.mp4"):
-        backgrounds[file.stem] = SkyBackground(file.stem)
+        shutil.rmtree(args.dataset)
+    args.dataset.mkdir(parents=True, exist_ok=True)
+    crop_img.mkdir(parents=True, exist_ok=True)
+    images.mkdir(parents=True, exist_ok=True)
 
 
 if __name__ == "__main__":
-    init_dataset()
+    init()
 
-    db = GenshinDB()
-
-    parsers: List[DataParser] = [
-        CharacterParser(db),
-        ArtifactParser(db),
+    parsers: List[Parser] = [
+        CharacterParser(),
+        ArtifactParser(),
         ArtifactTierParser(),
         ArtifactCommonParser(),
     ]
 
-    det_train: List[str] = []
-    det_val: List[str] = []
+    def build_dataset(dataset_type: str, count: int) -> None:
+        det_lines: List[str] = []
+        rec_lines: List[str] = []
+        blueprints: List[Blueprint] = []
+        image_hashes: Set[str] = set()
 
-    rec_train: List[str] = []
-    rec_val: List[str] = []
+        for parser in parsers:
+            for builder in parser.parser():
+                [blueprints.extend(builder.generate()) for _ in range(count)]
 
-    logger.info("Building dataset...")
+        for det in ImageBuilder(blueprints).build():
+            det_lines.append(det.label_line)
+            det.save()
+            for rec in det.recs:
+                if rec.image_hash in image_hashes:
+                    continue
+                rec_lines.append(rec.label_line)
+                image_hashes.add(rec.image_hash)
+                rec.save()
 
-    for parser in parsers:
-        for builder in parser.parser():
-            for option in builder.generate_train():
-                image_data = generate_image(option)
-                rec_train.append(image_data.get_rec())
-                det_train.append(image_data.get_det())
-                image_data.save_image()
+        write_file(
+            args.dataset.joinpath(f"det_{dataset_type}.txt"), "\n".join(det_lines)
+        )
+        write_file(
+            args.dataset.joinpath(f"rec_{dataset_type}.txt"), "\n".join(rec_lines)
+        )
 
-            for option in builder.generate_val():
-                image_data = generate_image(option)
-                rec_val.append(image_data.get_rec())
-                det_val.append(image_data.get_det())
-                image_data.save_image()
+    build_dataset("train", args.train_count)
+    build_dataset("val", args.val_count)
 
-    det_train_path = DATASET_PATH.joinpath("det_train.txt")
-    det_val_path = DATASET_PATH.joinpath("det_val.txt")
-    write_file(det_train_path, "\n".join(det_train))
-    write_file(det_val_path, "\n".join(det_val))
-    logger.info(f"Det train ({len(det_train)}): {det_train_path}")
-    logger.info(f"Det val ({len(det_val)}): {det_val_path}")
-
-    rec_train_path = DATASET_PATH.joinpath("rec_train.txt")
-    rec_val_path = DATASET_PATH.joinpath("rec_val.txt")
-    write_file(rec_train_path, "\n".join(rec_train))
-    write_file(rec_val_path, "\n".join(rec_val))
-    logger.info(f"Rec train ({len(rec_train)}): {rec_train_path}")
-    logger.info(f"Rec val ({len(rec_val)}): {rec_val_path}")
+    logger.info("Dataset built successfully.")
