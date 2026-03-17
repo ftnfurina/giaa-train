@@ -1,11 +1,5 @@
 # GIAA OCR 模型炼丹
 
-> [!Tip]
-> 本人训练环境为：云服务器
-> 1. GeForce RTX 4090 (24G)
-> 2. Ubuntu 22.04
-> 3. CUDA 12.4
-
 此项目为 [GIAA](https://github.com/ftnfurina/giaa) 项目的 OCR 模型炼丹，基于 PaddleOCR PP-OCRv5 版本微调。
 
 ## 环境搭建
