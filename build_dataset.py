@@ -28,16 +28,20 @@ import itertools
 import math
 
 logger = get_logger("dataset")
+DATASET = Path("dataset")
+BACKGROUND = Path("configs/background/")
+GENSHIN_DB = Path("genshin-db")
+GENSHIN_TTF = Path("configs/genshin.ttf")
+CROP_IMG_NAME = "crop_img"
+IMAGES_NAME = "images"
+CROP_IMG = DATASET.joinpath(CROP_IMG_NAME)
+IMAGES = DATASET.joinpath(IMAGES_NAME)
 
 
 class ArgsNamespace(Namespace):
     seed: int
-    genshin_db: Path
-    genshin_ttf: Path
-    background: Path
     rec_padding: int
     det_padding: int
-    dataset: Path
     color_offset: int
     font_size_offset: int
     train_count: int
@@ -53,24 +57,6 @@ class ArgsParser(ArgumentParser):
         )
         self.add_argument("--seed", type=int, default=1, help="Random seed")
         self.add_argument(
-            "--genshin-db",
-            type=Path,
-            default=Path("genshin-db"),
-            help="Path to Genshin-DB",
-        )
-        self.add_argument(
-            "--genshin-ttf",
-            type=Path,
-            default=Path("configs/genshin.ttf"),
-            help="Path to Genshin font",
-        )
-        self.add_argument(
-            "--background",
-            type=Path,
-            default=Path("configs/background/"),
-            help="Path to Background videos",
-        )
-        self.add_argument(
             "--rec-padding",
             type=int,
             default=3,
@@ -81,12 +67,6 @@ class ArgsParser(ArgumentParser):
             type=int,
             default=16,
             help="Padding for detection",
-        )
-        self.add_argument(
-            "--dataset",
-            type=Path,
-            default=Path("dataset"),
-            help="Path to dataset",
         )
         self.add_argument(
             "--color-offset",
@@ -119,10 +99,6 @@ class ArgsParser(ArgumentParser):
 
 args = ArgsParser().parse_args()
 logger.info(f"Args: {args}")
-crop_img_name = "crop_img"
-images_name = "images"
-crop_img = args.dataset.joinpath(crop_img_name)
-images = args.dataset.joinpath(images_name)
 
 
 class IdGenerator:
@@ -138,8 +114,8 @@ def read_file(file: Path) -> str:
         return f.read()
 
 
-def write_file(file: Path, content: str) -> None:
-    with open(file, "w", encoding="utf-8") as f:
+def append_file(file: Path, content: str) -> None:
+    with open(file, "a", encoding="utf-8") as f:
         f.write(content)
 
 
@@ -313,9 +289,7 @@ class ArtifactJson:
 
 class GenshinDatabase:
     def __init__(self):
-        self.chinese_simplified = args.genshin_db.joinpath(
-            "src/data/ChineseSimplified/"
-        )
+        self.chinese_simplified = GENSHIN_DB.joinpath("src/data/ChineseSimplified/")
 
     def read_files(self, folder: str) -> List[str]:
         return [
@@ -336,16 +310,16 @@ database = GenshinDatabase()
 class StarrySkyVideo:
     def __init__(self, name: str):
         self.name = name
-        self.cap = cv2.VideoCapture(args.background.joinpath(f"{name}.mp4"))
+        self.cap = cv2.VideoCapture(BACKGROUND.joinpath(f"{name}.mp4"))
         self.frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
 
-class StarrySkyManager:
+class StarrySkyBackground:
     def __init__(self):
         self.starry_skies: Dict[StarrySky, StarrySkyVideo] = {}
-        for file in args.background.glob("*.mp4"):
+        for file in BACKGROUND.glob("*.mp4"):
             name = file.stem
             video = StarrySkyVideo(name)
             if name.upper() in ElementText.__members__:
@@ -353,11 +327,8 @@ class StarrySkyManager:
             elif name.upper() in Rarity.__members__:
                 self.starry_skies[Rarity[name.upper()]] = video
 
-    def get_starry_sky_video(self, starry_sky: StarrySky) -> StarrySkyVideo:
-        return self.starry_skies[starry_sky]
-
     def get_random_frame(self, starry_sky: StarrySky) -> Image.Image:
-        video = self.get_starry_sky_video(starry_sky)
+        video = self.starry_skies[starry_sky]
         frame_index = random_randint(0, video.frames - 1)
         video.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ret, frame = video.cap.read()
@@ -374,7 +345,7 @@ class StarrySkyManager:
         return min(video.height for video in self.starry_skies.values())
 
 
-starry_sky_manager = StarrySkyManager()
+starry_sky_background = StarrySkyBackground()
 
 
 @dataclass
@@ -410,20 +381,31 @@ class BlueprintBrick:
             max(0, math.floor(self.rect[0] - args.rec_padding)),
             max(0, math.floor(self.rect[1] - args.rec_padding)),
             min(
-                starry_sky_manager.min_width,
+                starry_sky_background.min_width,
                 math.ceil(self.rect[0] + self.rect[2] + args.rec_padding),
             ),
             min(
-                starry_sky_manager.min_height,
+                starry_sky_background.min_height,
                 math.ceil(self.rect[1] + self.rect[3] + args.rec_padding),
             ),
         )
+
+    def zoom(self, zoom: float) -> "BlueprintBrick":
+        new_brick = deepcopy(self)
+        new_brick.rect = (
+            self.rect[0] * zoom,
+            self.rect[1] * zoom,
+            self.rect[2] * zoom,
+            self.rect[3] * zoom,
+        )
+        return new_brick
 
 
 @dataclass
 class Rec:
     brick: BlueprintBrick
     image: Image.Image
+    zoom: float = 1.0
     id: int = field(default_factory=IdGenerator())
 
     @property
@@ -432,14 +414,14 @@ class Rec:
 
     @property
     def filename(self) -> str:
-        return f"{str(self.id).zfill(7)}.png"
+        return f"{str(self.id).zfill(5)}-{self.zoom:.2f}.png"
 
     @property
     def label_line(self) -> str:
-        return f"{Path(crop_img_name).joinpath(self.filename)}\t{self.brick.blueprint.text}"
+        return f"{Path(CROP_IMG_NAME).joinpath(self.filename).as_posix()}\t{self.brick.blueprint.text}"
 
     def save(self) -> None:
-        self.image.save(f"{crop_img.joinpath(self.filename)}")
+        self.image.save(f"{CROP_IMG.joinpath(self.filename)}")
 
 
 @dataclass
@@ -447,25 +429,57 @@ class Det:
     bricks: List[BlueprintBrick]
     image: Image.Image
     id: int = field(default_factory=IdGenerator())
+    _zoom: float = field(init=False, default=1.0)
+    _recs: List[Rec] = field(init=False, default_factory=list)
+
+    def __post_init__(self):
+        self._recs = [
+            Rec(brick, self.zoom_image.crop(brick.box), self.zoom)
+            for brick in self.zoom_bricks
+        ]
+
+    def update_zoom(self, zoom: float) -> None:
+        self._zoom = zoom
+        for index, brick in enumerate(self.zoom_bricks):
+            self._recs[index].zoom = zoom
+            self._recs[index].image = self.zoom_image.crop(brick.box)
+            self._recs[index].brick = brick
+
+    @property
+    def zoom(self) -> float:
+        return self._zoom
+
+    @property
+    def zoom_image(self) -> Image.Image:
+        return self.image.resize(
+            (
+                int(self.image.width * self.zoom),
+                int(self.image.height * self.zoom),
+            )
+        )
+
+    @property
+    def zoom_bricks(self) -> List[BlueprintBrick]:
+        return [brick.zoom(self.zoom) for brick in self.bricks]
 
     @property
     def filename(self) -> str:
-        return f"{str(self.id).zfill(7)}.png"
+        return f"{str(self.id).zfill(5)}-{self.zoom:.2f}.png"
 
     @property
     def label_line(self) -> str:
         data = [
             {"transcription": brick.blueprint.text, "points": brick.points}
-            for brick in self.bricks
+            for brick in self.zoom_bricks
         ]
-        return f"{Path(images_name).joinpath(self.filename)}\t{json.dumps(data, ensure_ascii=False)}"
+        return f"{Path(IMAGES_NAME).joinpath(self.filename).as_posix()}\t{json.dumps(data, ensure_ascii=False)}"
 
     def save(self) -> None:
-        self.image.save(f"{images.joinpath(self.filename)}")
+        self.zoom_image.save(f"{IMAGES.joinpath(self.filename)}")
 
     @property
     def recs(self) -> List[Rec]:
-        return [Rec(brick, self.image.crop(brick.box)) for brick in self.bricks]
+        return self._recs
 
 
 class ImageBuilder:
@@ -488,9 +502,9 @@ class ImageBuilder:
         item: List[BlueprintBrick] = []
         while len(blueprints) > 0:
             blueprint = blueprints.pop(0)
-            font = ImageFont.truetype(args.genshin_ttf, blueprint.font_size)
+            font = ImageFont.truetype(GENSHIN_TTF, blueprint.font_size)
             bbox = font.getbbox(blueprint.text)
-            assert bbox[2] <= starry_sky_manager.min_width
+            assert bbox[2] <= starry_sky_background.min_width
             filled_height += bbox[3]
             item.append(
                 BlueprintBrick(
@@ -503,9 +517,11 @@ class ImageBuilder:
                     blueprint,
                 )
             )
-            interval = (starry_sky_manager.min_height - filled_height) / (len(item) + 1)
+            interval = (starry_sky_background.min_height - filled_height) / (
+                len(item) + 1
+            )
             if (
-                filled_height > starry_sky_manager.min_height
+                filled_height > starry_sky_background.min_height
                 or len(blueprints) == 0
                 or interval < args.det_padding
             ):
@@ -514,7 +530,7 @@ class ImageBuilder:
                     brick.rect = (
                         random_uniform(
                             args.rec_padding,
-                            starry_sky_manager.min_width
+                            starry_sky_background.min_width
                             - brick.rect[2]
                             - args.rec_padding,
                         ),
@@ -530,16 +546,16 @@ class ImageBuilder:
 
     def build_det(self, bricks: List[BlueprintBrick], background: Background) -> Det:
         if isinstance(background, StarrySky):
-            image = starry_sky_manager.get_random_frame(background)
+            image = starry_sky_background.get_random_frame(background)
         else:
             image = Image.new(
                 "RGB",
-                (starry_sky_manager.min_width, starry_sky_manager.min_height),
+                (starry_sky_background.min_width, starry_sky_background.min_height),
                 background,
             )
         draw = ImageDraw.Draw(image)
         for brick in bricks:
-            font = ImageFont.truetype(args.genshin_ttf, brick.blueprint.font_size)
+            font = ImageFont.truetype(GENSHIN_TTF, brick.blueprint.font_size)
             draw.text(
                 brick.rect[:2],
                 text=brick.blueprint.text,
@@ -611,7 +627,6 @@ class ArtifactImageGenerator(Generator):
 
     def generate_part(self) -> List[Blueprint]:
         result: List[Blueprint] = []
-
         for slot in self.slots:
             for rarity in self.rarities:
                 background = self.rarity_background.get(rarity)
@@ -623,7 +638,6 @@ class ArtifactImageGenerator(Generator):
                         background=background,
                     )
                 )
-
         return result
 
     def generate_set(self) -> Blueprint:
@@ -703,7 +717,6 @@ class ArtifactRarityImageGenerator(Generator):
                     background=background,
                 )
             )
-
         return result
 
     def generate_sky_unactivated_attribute(self) -> Blueprint:
@@ -727,7 +740,6 @@ class ArtifactRarityImageGenerator(Generator):
                     background=self.rarity,
                 )
             )
-
         return result
 
     def generate_sky_attribute(self) -> Blueprint:
@@ -867,12 +879,12 @@ class ArtifactCommonParser(Parser):
 
 
 def init() -> None:
-    if args.dataset.exists():
+    if DATASET.exists():
         logger.info("Dataset already exists, removing...")
-        shutil.rmtree(args.dataset)
-    args.dataset.mkdir(parents=True, exist_ok=True)
-    crop_img.mkdir(parents=True, exist_ok=True)
-    images.mkdir(parents=True, exist_ok=True)
+        shutil.rmtree(DATASET)
+    DATASET.mkdir(parents=True, exist_ok=True)
+    CROP_IMG.mkdir(parents=True, exist_ok=True)
+    IMAGES.mkdir(parents=True, exist_ok=True)
 
 
 if __name__ == "__main__":
@@ -885,34 +897,32 @@ if __name__ == "__main__":
         ArtifactCommonParser(),
     ]
 
-    def build_dataset(dataset_type: str, count: int) -> None:
-        det_lines: List[str] = []
-        rec_lines: List[str] = []
+    def build_dataset(dataset_type: str, count: int, zooms: List[float]) -> None:
+        det_file = DATASET.joinpath(f"det_{dataset_type}.txt")
+        rec_file = DATASET.joinpath(f"rec_{dataset_type}.txt")
         blueprints: List[Blueprint] = []
         image_hashes: Set[str] = set()
+
+        append_file(det_file, "")
+        append_file(rec_file, "")
 
         for parser in parsers:
             for builder in parser.parser():
                 [blueprints.extend(builder.generate()) for _ in range(count)]
 
         for det in ImageBuilder(blueprints).build():
-            det_lines.append(det.label_line)
-            det.save()
-            for rec in det.recs:
-                if rec.image_hash in image_hashes:
-                    continue
-                rec_lines.append(rec.label_line)
-                image_hashes.add(rec.image_hash)
-                rec.save()
+            for zoom in zooms:
+                det.update_zoom(zoom)
+                append_file(det_file, det.label_line + "\n")
+                det.save()
+                for rec in det.recs:
+                    if rec.image_hash in image_hashes:
+                        continue
+                    append_file(rec_file, rec.label_line + "\n")
+                    image_hashes.add(rec.image_hash)
+                    rec.save()
 
-        write_file(
-            args.dataset.joinpath(f"det_{dataset_type}.txt"), "\n".join(det_lines)
-        )
-        write_file(
-            args.dataset.joinpath(f"rec_{dataset_type}.txt"), "\n".join(rec_lines)
-        )
-
-    build_dataset("train", args.train_count)
-    build_dataset("val", args.val_count)
+    build_dataset("train", args.train_count, [1.0, 0.83, 0.66])
+    build_dataset("val", args.val_count, [1.0, 0.83, 0.66])
 
     logger.info("Dataset built successfully.")

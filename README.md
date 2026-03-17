@@ -1,5 +1,13 @@
 # GIAA OCR 模型炼丹
 
+> [!Tip]
+> 本人训练环境为：云服务器
+> 1. GeForce RTX 4090 (24G)
+> 2. Ubuntu 22.04
+> 3. CUDA 12.4
+
+此项目为 [GIAA](https://github.com/ftnfurina/giaa) 项目的 OCR 模型炼丹，基于 PaddleOCR PP-OCRv5 版本微调。
+
 ## 环境搭建
 
 ### 克隆项目
@@ -54,28 +62,22 @@ screen -r giaa-train # 进入 screen 窗口
 ### 开始训练
 
 ```bash
-uv run PaddleOCR/tools/train.py -c configs/PP-OCRv5_mobile_det.yml
-uv run PaddleOCR/tools/train.py -c configs/PP-OCRv5_mobile_rec.yml
-```
-### 启动可视化工具
-
-```bash
-uv run visualdl --logdir output/PP-OCRv5_mobile_giaa_det/vdl_log --port 8800
-uv run visualdl --logdir output/PP-OCRv5_mobile_giaa_rec/vdl_log --port 8800
+uv run PaddleOCR/tools/train.py -c configs/PP-OCRv5_mobile_det.yml # -o Global.use_gpu=False
+uv run PaddleOCR/tools/train.py -c configs/PP-OCRv5_mobile_rec.yml # -o Global.use_gpu=False
 ```
 
 ### 评估模型
 
 ```bash
-uv run PaddleOCR/tools/eval.py -c configs/PP-OCRv5_mobile_det.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_det/latest.pdparams
-uv run PaddleOCR/tools/eval.py -c configs/PP-OCRv5_mobile_rec.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_rec/latest.pdparams
+uv run PaddleOCR/tools/eval.py -c configs/PP-OCRv5_mobile_det.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_det/best_accuracy.pdparams
+uv run PaddleOCR/tools/eval.py -c configs/PP-OCRv5_mobile_rec.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_rec/best_accuracy.pdparams
 ```
 
 ### 导出模型
 
 ```bash
-uv run PaddleOCR/tools/export_model.py -c configs/PP-OCRv5_mobile_det.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_det/latest.pdparams Global.save_inference_dir=output/PP-OCRv5_mobile_giaa_det_infer/
-uv run PaddleOCR/tools/export_model.py -c configs/PP-OCRv5_mobile_rec.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_rec/latest.pdparams Global.save_inference_dir=output/PP-OCRv5_mobile_giaa_rec_infer/
+uv run PaddleOCR/tools/export_model.py -c configs/PP-OCRv5_mobile_det.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_det/best_accuracy.pdparams Global.save_inference_dir=output/PP-OCRv5_mobile_giaa_det_infer/
+uv run PaddleOCR/tools/export_model.py -c configs/PP-OCRv5_mobile_rec.yml -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_rec/best_accuracy.pdparams Global.save_inference_dir=output/PP-OCRv5_mobile_giaa_rec_infer/
 ```
 
 ### 模型转换

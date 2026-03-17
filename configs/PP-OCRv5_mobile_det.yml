@@ -2,21 +2,19 @@ Global:
   model_name: PP-OCRv5_mobile_giaa_det # To use static model for inference.
   debug: true
   use_gpu: true
-  epoch_num: &epoch_num 4
+  epoch_num: &epoch_num 3
   log_smooth_window: 20
-  print_batch_step: 100
-  save_model_dir: ./output/PP-OCRv5_mobile_giaa_det
+  print_batch_step: 10
+  save_model_dir: output/PP-OCRv5_mobile_giaa_det
   save_epoch_step: 10
-  eval_batch_step:
-    - 0
-    - 1500
+  eval_batch_step: [0, 400]
   cal_metric_during_train: false
   checkpoints:
-  pretrained_model: ./configs/PP-OCRv5_mobile_det_pretrained.pdparams
+  pretrained_model: configs/PP-OCRv5_mobile_det_pretrained.pdparams
   save_inference_dir: null
   use_visualdl: true
-  infer_img: doc/imgs_en/img_10.jpg
-  save_res_path: ./checkpoints/det_db/predicts_db.txt
+  infer_img: PaddleOCR/doc/imgs_en/img_10.jpg
+  save_res_path: checkpoints/det_db/predicts_db.txt
   d2s_train_image_shape: [3, 640, 640]
   distributed: true
 
@@ -51,7 +49,7 @@ Optimizer:
   beta2: 0.999
   lr:
     name: Cosine
-    learning_rate: 0.001 #(8*8c)
+    learning_rate: 0.000125 #(8*8c) 0.001/8
     warmup_epoch: 2
   regularizer:
     name: L2
@@ -71,9 +69,9 @@ Metric:
 Train:
   dataset:
     name: SimpleDataSet
-    data_dir: ./dataset/
+    data_dir: dataset/
     label_file_list:
-      - ./dataset/det_train.txt
+      - dataset/det_train.txt
     ratio_list: [1.0]
     transforms:
       - DecodeImage:
@@ -139,9 +137,9 @@ Train:
 Eval:
   dataset:
     name: SimpleDataSet
-    data_dir: ./dataset/
+    data_dir: dataset/
     label_file_list:
-      - ./dataset/det_val.txt
+      - dataset/det_val.txt
     transforms:
       - DecodeImage:
           img_mode: BGR

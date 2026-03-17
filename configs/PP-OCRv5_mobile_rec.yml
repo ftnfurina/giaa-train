@@ -2,24 +2,24 @@ Global:
   model_name: PP-OCRv5_mobile_giaa_rec # To use static model for inference.
   debug: true
   use_gpu: true
-  epoch_num: 4
+  epoch_num: 3
   log_smooth_window: 20
   print_batch_step: 10
-  save_model_dir: ./output/PP-OCRv5_mobile_giaa_rec
+  save_model_dir: output/PP-OCRv5_mobile_giaa_rec
   save_epoch_step: 10
-  eval_batch_step: [0, 2000]
+  eval_batch_step: [0, 400]
   cal_metric_during_train: true
-  pretrained_model: ./configs/PP-OCRv5_mobile_rec_pretrained.pdparams
+  pretrained_model: configs/PP-OCRv5_mobile_rec_pretrained.pdparams
   checkpoints:
   save_inference_dir:
   use_visualdl: true
-  infer_img: doc/imgs_words/ch/word_1.jpg
+  infer_img: PaddleOCR/doc/imgs_words/ch/word_1.jpg
   character_dict_path: configs/ppocrv5_dict.txt
   max_text_length: &max_text_length 25
   infer_mode: false
   use_space_char: true
   distributed: true
-  save_res_path: ./output/rec/predicts_ppocrv5.txt
+  save_res_path: output/rec/predicts_ppocrv5.txt
   d2s_train_image_shape: [3, 48, 320]
 
 Optimizer:
@@ -28,7 +28,7 @@ Optimizer:
   beta2: 0.999
   lr:
     name: Cosine
-    learning_rate: 0.0001
+    learning_rate: 0.0000625 # 0.0005/8
     warmup_epoch: 5
   regularizer:
     name: L2
@@ -75,10 +75,10 @@ Train:
   dataset:
     name: MultiScaleDataSet
     ds_width: false
-    data_dir: ./dataset/
+    data_dir: dataset/
     ext_op_transform_idx: 1
     label_file_list:
-      - ./dataset/rec_train.txt
+      - dataset/rec_train.txt
     transforms:
       - DecodeImage:
           img_mode: BGR
@@ -113,9 +113,9 @@ Train:
 Eval:
   dataset:
     name: SimpleDataSet
-    data_dir: ./dataset/
+    data_dir: dataset/
     label_file_list:
-      - ./dataset/rec_val.txt
+      - dataset/rec_val.txt
     transforms:
       - DecodeImage:
           img_mode: BGR
