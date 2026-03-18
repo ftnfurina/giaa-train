@@ -11,6 +11,7 @@ from typing import (
     Type,
     Dict,
     Set,
+    Generator,
 )
 from pathlib import Path
 from enum import Enum, IntEnum
@@ -561,17 +562,15 @@ class ImageBuilder:
             )
         return Det(bricks, image)
 
-    def build(self) -> List[Det]:
-        result: List[Det] = []
+    def build(self) -> Generator[Det, None, None]:
         for background, blueprints in self.blueprint_groups.items():
             for bricks in self.group_blueprints(random_shuffle(deepcopy(blueprints))):
                 det = self.build_det(bricks, background)
                 logger.debug(f"Generated {det}")
-                result.append(det)
-        return result
+                yield det
 
 
-class Generator:
+class ImageGenerator:
     def __init__(self, text: str):
         self.text = text
 
@@ -579,7 +578,7 @@ class Generator:
         raise NotImplementedError()
 
 
-class CharacterImageGenerator(Generator):
+class CharacterImageGenerator(ImageGenerator):
     def __init__(self, character: CharacterJson):
         super().__init__(character.name)
         self.character = character
@@ -607,7 +606,7 @@ class CharacterImageGenerator(Generator):
         return [self.generate_sky(), self.generate_equipped()]
 
 
-class ArtifactImageGenerator(Generator):
+class ArtifactImageGenerator(ImageGenerator):
     def __init__(
         self, text: str, rarities: List[Rarity], slots: List[ArtifactSlotJson]
     ):
@@ -669,7 +668,7 @@ class ArtifactImageGenerator(Generator):
         )
 
 
-class ArtifactRarityImageGenerator(Generator):
+class ArtifactRarityImageGenerator(ImageGenerator):
     def __init__(self, text: str, rarity: Rarity):
         super().__init__(text)
         self.rarity = rarity
@@ -771,7 +770,7 @@ class ArtifactRarityImageGenerator(Generator):
         )
 
 
-class ArtifactCommonImageGenerator(Generator):
+class ArtifactCommonImageGenerator(ImageGenerator):
     def __init__(self):
         super().__init__("")
 
@@ -825,7 +824,7 @@ class ArtifactCommonImageGenerator(Generator):
         )
 
 
-class CommonImageGenerator(Generator):
+class CommonImageGenerator(ImageGenerator):
     def __init__(self):
         super().__init__("")
 
@@ -860,12 +859,12 @@ class CommonImageGenerator(Generator):
 
 
 class Parser:
-    def parser(self) -> List[Generator]:
+    def parser(self) -> List[ImageGenerator]:
         raise NotImplementedError()
 
 
 class CharacterParser(Parser):
-    def parser(self) -> List[Generator]:
+    def parser(self) -> List[ImageGenerator]:
         return [
             CharacterImageGenerator(character)
             for character in database.read_characters()
@@ -873,7 +872,7 @@ class CharacterParser(Parser):
 
 
 class ArtifactParser(Parser):
-    def parser(self) -> List[Generator]:
+    def parser(self) -> List[ImageGenerator]:
         return [
             ArtifactImageGenerator(
                 artifact.name,
@@ -889,17 +888,17 @@ class ArtifactParser(Parser):
 
 
 class ArtifactRarityParser(Parser):
-    def parser(self) -> List[Generator]:
+    def parser(self) -> List[ImageGenerator]:
         return [ArtifactRarityImageGenerator(rarity.value, rarity) for rarity in Rarity]
 
 
 class ArtifactCommonParser(Parser):
-    def parser(self) -> List[Generator]:
+    def parser(self) -> List[ImageGenerator]:
         return [ArtifactCommonImageGenerator()]
 
 
 class CommonParser(Parser):
-    def parser(self) -> List[Generator]:
+    def parser(self) -> List[ImageGenerator]:
         return [CommonImageGenerator()]
 
 
