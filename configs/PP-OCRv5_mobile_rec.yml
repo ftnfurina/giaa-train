@@ -2,7 +2,7 @@ Global:
   model_name: PP-OCRv5_mobile_giaa_rec # To use static model for inference.
   debug: true
   use_gpu: true
-  epoch_num: 3
+  epoch_num: 4
   log_smooth_window: 20
   print_batch_step: 10
   save_model_dir: output/PP-OCRv5_mobile_giaa_rec

@@ -29,6 +29,7 @@
     "pdiparams",
     "pdparams",
     "ppocr",
+    "ppocrv",
     "pretrained",
     "pyclipper",
     "pyproject",
