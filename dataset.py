@@ -829,14 +829,6 @@ class CommonImageGenerator(Generator):
     def __init__(self):
         super().__init__("")
 
-    def generate_training_guide(self) -> Blueprint:
-        return Blueprint(
-            text="提升指南",
-            font_size=22,
-            color=(59, 66, 85),
-            background=(236, 229, 216),
-        )
-
     def generate_not_equipped_red_dot(self) -> List[Blueprint]:
         return [
             Blueprint(
@@ -862,7 +854,6 @@ class CommonImageGenerator(Generator):
 
     def generate(self) -> List[Blueprint]:
         return flatten(
-            self.generate_training_guide(),
             self.generate_not_equipped_red_dot(),
             self.generate_element_text(),
         )
