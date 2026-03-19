@@ -40,7 +40,7 @@ echo "Start export ${type} model"
 # 导出模型
 uv run PaddleOCR/tools/export_model.py -c configs/PP-OCRv5_mobile_${type}.yml \
  -o Global.pretrained_model=output/PP-OCRv5_mobile_giaa_${type}/best_accuracy.pdparams \
- -o Global.save_inference_dir=output/PP-OCRv5_mobile_giaa_${type}_infer/
+    Global.save_inference_dir=output/PP-OCRv5_mobile_giaa_${type}_infer/
 
 if [ $? -ne 0 ]; then
     echo "Export failed"
